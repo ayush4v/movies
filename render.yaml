@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: telegram-video-bot
+    env: python
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python main.py"
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: STORAGE_PROVIDER
+        value: local
+      - key: HEALTH_CHECK_HOST
+        value: 0.0.0.0
+      - key: HEALTH_CHECK_PORT
+        value: 8080
+      - key: RUN_SYNC_ON_STARTUP
+        value: false
+      - key: LOG_LEVEL
+        value: INFO
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHANNEL_ID
+        value: "@Moviesfilmodbots"
+      - key: ADMIN_USER_IDS
+        value: "6295625970"
