@@ -5,8 +5,8 @@ services:
     region: oregon
     plan: free
     branch: main
-    buildCommand: "python3 -m pip install -r requirements.txt --break-system-packages"
-    startCommand: "python3 main.py"
+    buildCommand: "python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
+    startCommand: "source .venv/bin/activate && python main.py"
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
