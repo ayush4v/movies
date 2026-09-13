@@ -5,8 +5,8 @@ services:
     region: oregon
     plan: free
     branch: main
-    buildCommand: "pip install -r requirements.txt --break-system-packages"
-    startCommand: "python main.py"
+    buildCommand: "python3 -m pip install -r requirements.txt --break-system-packages"
+    startCommand: "python3 main.py"
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
