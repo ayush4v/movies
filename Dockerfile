@@ -1,45 +1,26 @@
-# Multi-stage production Dockerfile for Telegram Automation Bot
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim
 
 WORKDIR /app
 
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     curl \
+    gcc \
     && rm -rf /var/lib/apt/lists/*
 
+# Install python packages directly into system environment
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Final runtime image
-FROM python:3.12-slim AS runner
+# Copy application files
+COPY . .
 
-WORKDIR /app
-
-# Install curl for health check
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root system user
-RUN useradd -m -u 1001 appuser && \
-    mkdir -p /app/data /app/logs /app/media_storage && \
-    chown -R appuser:appuser /app
-
-# Copy Python packages from builder stage
-COPY --from=builder /root/.local /home/appuser/.local
-ENV PATH=/home/appuser/.local/bin:$PATH
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-
-# Copy application source code
-COPY --chown=appuser:appuser . /app
-
-USER appuser
+# Ensure storage and data directories exist
+RUN mkdir -p /app/data /app/logs /app/media_storage
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8080}/health || exit 1
 
-ENTRYPOINT ["python", "main.py"]
+CMD ["python", "main.py"]
