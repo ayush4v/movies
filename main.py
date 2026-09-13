@@ -73,7 +73,13 @@ async def run_server() -> None:
     # 6. Start Telegram Bot Polling
     updater = bot_app.updater
     if updater:
-        await updater.start_polling(drop_pending_updates=False)
+        try:
+            # Clear any stale webhook before starting polling
+            await bot_app.bot.delete_webhook(drop_pending_updates=True)
+        except Exception as e:
+            logger.warning(f"Could not reset webhook: {e}")
+
+        await updater.start_polling(drop_pending_updates=True)
         logger.info("Telegram Bot polling started. Ready to receive commands.")
 
     # Graceful shutdown event
@@ -127,6 +133,15 @@ def main():
     except KeyboardInterrupt:
         logger.info("Process interrupted by user.")
         sys.exit(0)
+    except Exception as exc:
+        import traceback
+        err_msg = f"\n{'='*60}\nFATAL STARTUP CRASH:\n{traceback.format_exc()}{'='*60}\n"
+        sys.stderr.write(err_msg)
+        sys.stderr.flush()
+        sys.stdout.write(err_msg)
+        sys.stdout.flush()
+        logger.critical(f"Application crashed on startup: {exc}", exc_info=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -47,7 +47,9 @@ def build_telegram_application(
     bot_token = token or curr_settings.telegram_bot_token
 
     if not bot_token:
-        logger.warning("TELEGRAM_BOT_TOKEN is not configured in settings.")
+        err = "CRITICAL: TELEGRAM_BOT_TOKEN is missing or empty! Please add TELEGRAM_BOT_TOKEN in Render Environment Variables."
+        logger.critical(err)
+        raise ValueError(err)
 
     app = ApplicationBuilder().token(bot_token).build()
 
