@@ -59,12 +59,12 @@ async def run_server() -> None:
         asyncio.create_task(sync_service.run_sync(sync_source="startup"))
 
     # 5. Start Healthcheck & Webhook API server in background
-    api_app = create_api_app(sync_service=sync_service)
+    api_app = create_api_app(sync_service=sync_service, bot_app=bot_app)
     uvi_config = uvicorn.Config(
         app=api_app,
         host=settings.health_check_host,
         port=settings.health_check_port,
-        log_level="warning",
+        log_level="info",
         access_log=False,
     )
     uvi_server = uvicorn.Server(uvi_config)
@@ -75,11 +75,11 @@ async def run_server() -> None:
     if updater:
         try:
             # Clear any stale webhook before starting polling
-            await bot_app.bot.delete_webhook(drop_pending_updates=True)
+            await bot_app.bot.delete_webhook(drop_pending_updates=False)
         except Exception as e:
             logger.warning(f"Could not reset webhook: {e}")
 
-        await updater.start_polling(drop_pending_updates=True)
+        await updater.start_polling(drop_pending_updates=False)
         logger.info("Telegram Bot polling started. Ready to receive commands.")
 
     # Graceful shutdown event

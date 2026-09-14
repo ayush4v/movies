@@ -13,7 +13,7 @@ from app.storage.factory import get_storage_provider
 START_TIME = datetime.now(timezone.utc)
 
 
-def create_api_app(sync_service=None) -> FastAPI:
+def create_api_app(sync_service=None, bot_app=None) -> FastAPI:
     """Create configured FastAPI application."""
     app = FastAPI(
         title="Telegram Automation Bot API",
@@ -23,15 +23,24 @@ def create_api_app(sync_service=None) -> FastAPI:
 
     @app.get("/")
     async def root():
+        bot_info = None
+        if bot_app and hasattr(bot_app, "bot"):
+            try:
+                me = await bot_app.bot.get_me()
+                bot_info = {"id": me.id, "username": f"@{me.username}", "first_name": me.first_name}
+            except Exception as e:
+                bot_info = {"error": str(e)}
+
         return {
             "name": "Telegram Automation Bot",
             "version": __version__,
             "status": "online",
+            "bot": bot_info,
         }
 
     @app.get("/health")
     async def health_check():
-        """Production health check endpoint verifying database and storage connectivity."""
+        """Production health check endpoint verifying database, telegram, and storage connectivity."""
         settings = get_settings()
         db_healthy = False
         db_error = None
@@ -49,6 +58,24 @@ def create_api_app(sync_service=None) -> FastAPI:
         provider = get_storage_provider()
         storage_healthy = await provider.validate_connection()
 
+        # 3. Telegram Bot Health Check
+        telegram_healthy = False
+        telegram_details = {}
+        if bot_app and hasattr(bot_app, "bot"):
+            try:
+                me = await bot_app.bot.get_me()
+                telegram_healthy = True
+                telegram_details = {
+                    "status": "up",
+                    "id": me.id,
+                    "username": f"@{me.username}",
+                    "polling": bool(bot_app.updater and bot_app.updater.running),
+                }
+            except Exception as tg_err:
+                telegram_details = {"status": "down", "error": str(tg_err)}
+        else:
+            telegram_details = {"status": "unattached"}
+
         uptime_seconds = (datetime.now(timezone.utc) - START_TIME).total_seconds()
         is_healthy = db_healthy and storage_healthy
 
@@ -62,6 +89,7 @@ def create_api_app(sync_service=None) -> FastAPI:
                     "status": "up" if db_healthy else "down",
                     "error": db_error,
                 },
+                "telegram": telegram_details,
                 "storage_provider": {
                     "name": provider.provider_name,
                     "status": "up" if storage_healthy else "degraded",
