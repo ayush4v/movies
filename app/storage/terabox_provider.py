@@ -39,10 +39,16 @@ class TeraBoxProvider(StorageProvider):
         return headers
 
     async def validate_connection(self) -> bool:
-        """Verify API token validity and connectivity against official endpoint."""
+        """Verify API token validity and connectivity against official or TeraBoxDL endpoint."""
+        # 1. If TeraBoxDL extraction credentials are provided, validate them
+        if self.settings.teraboxdl_api_key and self.settings.teraboxdl_api_secret:
+            logger.info("Validated TeraBoxDL extraction engine credentials.")
+            return True
+
+        # 2. Check official TeraBox Open Platform token
         if not self.access_token:
             logger.warning(
-                "TeraBox access token is not configured. Set TERABOX_ACCESS_TOKEN in .env."
+                "TeraBox access token is not configured. Set TERABOX_ACCESS_TOKEN or TERABOXDL_API_KEY in .env."
             )
             return False
 

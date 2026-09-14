@@ -63,12 +63,16 @@ class Settings(BaseSettings):
         description="Public base URL for local file links, e.g. https://cdn.domain.com/videos",
     )
 
-    # --- TeraBox Official Open Platform Options ---
+    # --- TeraBox Official Open Platform & Extraction API Options ---
     terabox_app_id: Optional[str] = Field(default=None, alias="TERABOX_APP_ID")
     terabox_app_key: Optional[str] = Field(default=None, alias="TERABOX_APP_KEY")
     terabox_access_token: Optional[str] = Field(default=None, alias="TERABOX_ACCESS_TOKEN")
     terabox_root_folder: str = Field(default="/", alias="TERABOX_ROOT_FOLDER")
     terabox_webhook_secret: Optional[str] = Field(default=None, alias="TERABOX_WEBHOOK_SECRET")
+    teraboxdl_api_key: Optional[str] = Field(default="tbx_wkCj5NF2UTs6cmsPwfuTDC-KtF2gAr2ghoAsH5y4LkA", alias="TERABOXDL_API_KEY")
+    teraboxdl_api_secret: Optional[str] = Field(default="0OhZAOYMmEyjvsTXCfK2fQ9Ebw85DSNoMfa1FwtJpRBOg493WscCnrv7wrDm8-Hd", alias="TERABOXDL_API_SECRET")
+    teraboxdl_endpoint: str = Field(default="https://api.teraboxdl.site/v1/api", alias="TERABOXDL_ENDPOINT")
+
 
     # --- S3 Storage Options ---
     s3_endpoint_url: Optional[str] = Field(default=None, alias="S3_ENDPOINT_URL")

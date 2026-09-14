@@ -8,11 +8,14 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 from app.bot.handlers.admin_handlers import (
     add_command,
     admin_panel_command,
     delete_command,
+    handle_admin_message_link,
     resync_command,
     stats_command,
 )
@@ -68,6 +71,9 @@ def build_telegram_application(
 
     # Inline button callback queries
     app.add_handler(CallbackQueryHandler(handle_callback_query))
+
+    # Automatic link listener (catches TeraBox links and media URLs sent in chat)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_message_link))
 
     # Global error handler
     app.add_error_handler(global_error_handler)

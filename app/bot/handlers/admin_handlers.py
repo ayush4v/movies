@@ -20,13 +20,26 @@ from app.logger import logger
 from app.metadata.processor import MetadataProcessor
 from app.parser.filename_parser import parse_media_filename
 
+from app.services.teraboxdl_client import TeraBoxDLClient, TeraBoxExtractedItem
+
 # In-memory staging cache for manual /add workflow: staging_token -> {metadata, share_url, filename}
 STAGED_ADD_ITEMS: Dict[str, dict] = {}
 
 
 async def resolve_filename_from_url(url: str) -> str:
-    """Extract real file title from web share pages like TeraBox or standard web links."""
-    if any(k in url.lower() for k in ("terabox", "1024tera", "teraboxshare", "terabox.app")):
+    """Extract real file title from web share pages via TeraBoxDL API or standard web links."""
+    # 1. First priority: Use high-speed TeraBoxDL extraction API
+    if TeraBoxDLClient.is_terabox_url(url):
+        try:
+            client = TeraBoxDLClient()
+            extracted = await client.extract(url)
+            if extracted and extracted.filename and extracted.filename != "unknown_video.mp4":
+                logger.info(f"TeraBoxDL resolved filename: '{extracted.filename}'")
+                return extracted.filename
+        except Exception as e:
+            logger.warning(f"TeraBoxDL extraction failed, trying web scraper fallback: {e}")
+
+        # Fallback to HTML title parsing
         try:
             async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as s:
                 async with s.get(url, timeout=aiohttp.ClientTimeout(total=8), allow_redirects=True) as r:
@@ -45,6 +58,7 @@ async def resolve_filename_from_url(url: str) -> str:
     path = url.split("?")[0].rstrip("/")
     base = path.split("/")[-1]
     return base if base else "unknown_video.mp4"
+
 
 
 @admin_required
@@ -149,66 +163,34 @@ async def resync_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
 
 
-@admin_required
-async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin interactive /add workflow:
-
-    /add <share_url_or_filename>
-    -> parses title/year
-    -> fetches metadata from TMDB/OMDB
-    -> generates preview post
-    -> renders [Publish] and [Cancel] buttons
-    """
-    args = context.args
-    if not args:
-        if update.effective_message:
-            await update.effective_message.reply_text(
-                "➕ **Manual Post Staging Workflow**\n\n"
-                "Please provide an authorized share URL or filename after the command.\n\n"
-                "**Usage:**\n"
-                "`/add https://storage.example.com/videos/The.Matrix.1999.1080p.mp4`\n"
-                "or\n"
-                "`/add The.Matrix.1999.1080p.BluRay.x264.mkv`",
-                parse_mode=ParseMode.MARKDOWN,
-            )
+async def stage_and_preview_media(
+    update: Update,
+    share_url: str,
+    extra_text: str = "",
+) -> None:
+    """Core staging workflow: extract details (via TeraBoxDL or direct URL), fetch metadata, preview and offer publish buttons."""
+    if not update.effective_message:
         return
 
-    first_arg = args[0].strip()
-    extra_text = " ".join(args[1:]).strip() if len(args) > 1 else ""
+    status_msg = await update.effective_message.reply_text(
+        "⚡ **Processing Link...**\nFetching video details via TeraBoxDL API...",
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
-    # Determine filename from URL or input
-    if "://" in first_arg:
-        share_url = first_arg
-        resolved_filename = await resolve_filename_from_url(share_url)
-        # If extra_text is provided, use it to augment or override
-        if extra_text.isdigit() and len(extra_text) == 4:
-            # User provided just a year, e.g. /add <url> 2024
-            filename = f"{resolved_filename.rsplit('.', 1)[0]}.{extra_text}.mp4"
-        elif extra_text:
-            # User provided a custom title/year, e.g. /add <url> My Movie 2024
-            filename = f"{extra_text}.mp4"
-        else:
-            filename = resolved_filename
+    resolved_filename = await resolve_filename_from_url(share_url)
+    if extra_text.isdigit() and len(extra_text) == 4:
+        filename = f"{resolved_filename.rsplit('.', 1)[0]}.{extra_text}.mp4"
+    elif extra_text:
+        filename = f"{extra_text}.mp4"
     else:
-        raw_input = " ".join(args).strip()
-        filename = raw_input
-        settings = get_settings()
-        share_url = f"{settings.local_storage_base_url or 'https://storage.example.com'}/{filename}"
+        filename = resolved_filename
 
-    if update.effective_message:
-        await update.effective_message.reply_text(
-            f"🔍 Fetching metadata for: `{filename}`...",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-
-    # 1. Parse filename
+    # 1. Parse filename for Title & Year
     parsed = parse_media_filename(filename)
-
-    # If extra_text was just a year, ensure parsed.year is explicitly set
     if extra_text.isdigit() and len(extra_text) == 4:
         parsed.year = int(extra_text)
 
-    # 2. Enrich metadata
+    # 2. Enrich metadata from TMDB/OMDB
     processor = MetadataProcessor()
     metadata = await processor.process(parsed)
 
@@ -220,46 +202,92 @@ async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "filename": filename,
     }
 
-    # 4. Render preview
+    # 4. Format preview text
     preview_text = TelegramPublisher.format_post_text(metadata)
-
     keyboard = [
         [
-            InlineKeyboardButton("✅ Publish Now", callback_data=f"staged_pub:{staging_token}"),
+            InlineKeyboardButton("🚀 Publish to Channel", callback_data=f"staged_pub:{staging_token}"),
             InlineKeyboardButton("❌ Cancel", callback_data=f"staged_cancel:{staging_token}"),
         ]
     ]
 
-    header = "📋 **Post Preview (Admin Review):**\n" + ("=" * 28) + "\n\n"
+    header = "📋 **TeraBox Video Staging (Admin Preview):**\n" + ("=" * 30) + "\n\n"
 
-    if update.effective_message:
-        if metadata.poster_url:
-            try:
-                caption_text = header + preview_text
-                if len(caption_text) > 1020:
-                    caption_text = caption_text[:1017] + "..."
-                try:
-                    await update.effective_message.reply_photo(
-                        photo=metadata.poster_url,
-                        caption=caption_text,
-                        reply_markup=InlineKeyboardMarkup(keyboard),
-                        parse_mode=ParseMode.MARKDOWN,
-                    )
-                    return
-                except Exception:
-                    await update.effective_message.reply_photo(
-                        photo=metadata.poster_url,
-                        caption=caption_text,
-                        reply_markup=InlineKeyboardMarkup(keyboard),
-                    )
-                    return
-            except Exception as e:
-                logger.warning(f"Could not send preview photo: {e}")
+    try:
+        await status_msg.delete()
+    except Exception:
+        pass
 
-        await update.effective_message.reply_text(
-            header + preview_text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
+    if metadata.poster_url:
+        caption_text = header + preview_text
+        if len(caption_text) > 1020:
+            caption_text = caption_text[:1017] + "..."
+        try:
+            await update.effective_message.reply_photo(
+                photo=metadata.poster_url,
+                caption=caption_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+        except Exception as e:
+            logger.warning(f"Could not send preview photo: {e}")
+
+    await update.effective_message.reply_text(
+        header + preview_text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+@admin_required
+async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin interactive /add workflow:
+
+    /add <share_url_or_filename> [optional custom title or year]
+    """
+    args = context.args
+    if not args:
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                "➕ **Manual Post Staging Workflow**\n\n"
+                "Please provide a TeraBox share URL or filename.\n\n"
+                "**Usage:**\n"
+                "`/add https://terabox.com/s/1xxxxxx`\n"
+                "or\n"
+                "`/add The.Matrix.1999.1080p.BluRay.x264.mkv`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        return
+
+    first_arg = args[0].strip()
+    extra_text = " ".join(args[1:]).strip() if len(args) > 1 else ""
+
+    if "://" in first_arg:
+        await stage_and_preview_media(update, share_url=first_arg, extra_text=extra_text)
+    else:
+        raw_input = " ".join(args).strip()
+        filename = raw_input
+        settings = get_settings()
+        share_url = f"{settings.local_storage_base_url or 'https://storage.example.com'}/{filename}"
+        await stage_and_preview_media(update, share_url=share_url, extra_text="")
+
+
+@admin_required
+async def handle_admin_message_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Automatically detect when an authorized admin sends a TeraBox link or media URL in chat."""
+    message = update.effective_message
+    if not message or not message.text:
+        return
+
+    text = message.text.strip()
+    url_match = re.search(r"https?://[^\s]+", text)
+    if url_match:
+        url = url_match.group(0)
+        if TeraBoxDLClient.is_terabox_url(url) or any(ext in url.lower() for ext in (".mp4", ".mkv", ".avi")):
+            extra_text = text.replace(url, "").strip()
+            await stage_and_preview_media(update, share_url=url, extra_text=extra_text)
+
 
 
 @admin_required
